@@ -26,9 +26,7 @@ OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create one shared HTTP client for the app's lifetime."""
-    async with httpx.AsyncClient(
-        base_url=OLLAMA_URL, timeout=OLLAMA_TIMEOUT
-    ) as client:
+    async with httpx.AsyncClient(base_url=OLLAMA_URL, timeout=OLLAMA_TIMEOUT) as client:
         app.state.ollama = client
         logger.info("Ollama client ready (base_url=%s)", OLLAMA_URL)
         yield
