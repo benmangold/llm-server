@@ -1,0 +1,70 @@
+services:
+  llm-server:
+    build: .
+    image: llm-server:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # Your app can read this to reach the Ollama sidecar over the compose network.
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2
+      PORT: 8000
+    depends_on:
+      # Wait until the configured models are pulled before serving traffic.
+      ollama-pull:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    # Expose the API on the host too (optional; remove if you only want it internal).
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persist pulled models across container restarts.
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    # --- GPU (NVIDIA) support: uncomment to give Ollama access to GPUs ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot provisioner: waits for the Ollama server, tells it to pull each
+  # configured model into the shared volume, then exits. Does NOT mount the
+  # volume itself — `ollama pull` is a client call and the server does the
+  # download into its own volume. Idempotent: already-present models are no-ops.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      # Point the client at the running server instead of a local instance.
+      OLLAMA_HOST: http://ollama:11434
+      # Comma-separated list of models to pull (configure in .env).
+      OLLAMA_MODELS: ${OLLAMA_MODELS:-llama3.2}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "$$OLLAMA_MODELS" | tr ',' '\n' | while read -r model; do
+          model=$$(echo "$$model" | xargs)   # trim whitespace
+          [ -n "$$model" ] || continue
+          echo ">> pulling $$model"
+          ollama pull "$$model"
+        done
+        echo ">> all models pulled"
+    restart: "no"
+
+volumes:
+  ollama-models:
